@@ -68,6 +68,7 @@ tags:
 '''
 import os
 import sys
+import time
 
 from pathlib import Path
 
@@ -173,6 +174,8 @@ def test_large_changes(test_configuration, test_metadata, configure_local_intern
 
     # Create the file and and capture the event.
     truncate_file(WAZUH_LOG_PATH)
+    if test_metadata.get('fim_mode') == 'whodata':
+        time.sleep(3)
     original_string = generate_string(test_metadata.get('original_size'), '0')
     write_file_write(test_file_path, content=original_string)
 

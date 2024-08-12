@@ -67,6 +67,7 @@ tags:
     - fim_report_changes
 '''
 import os
+import time
 import sys
 
 from pathlib import Path
@@ -75,9 +76,10 @@ import pytest
 
 from wazuh_testing.constants.platforms import MACOS
 from wazuh_testing.constants.paths.logs import WAZUH_LOG_PATH
-from wazuh_testing.modules.fim.configuration import SYSCHECK_DEBUG
+from wazuh_testing.modules.fim.configuration import SYSCHECK_DEBUG, RT_DELAY
 from wazuh_testing.modules.agentd.configuration import AGENTD_WINDOWS_DEBUG
-from wazuh_testing.modules.fim.patterns import EVENT_TYPE_MODIFIED, EVENT_TYPE_ADDED, ERROR_MSG_FIM_EVENT_NOT_DETECTED, EVENT_TYPE_DELETED
+from wazuh_testing.modules.fim.patterns import EVENT_TYPE_MODIFIED, EVENT_TYPE_ADDED, ERROR_MSG_FIM_EVENT_NOT_DETECTED, \
+                                               EVENT_TYPE_DELETED, EVENT_TYPE_REPORT_CHANGES, ERROR_MSG_REPORT_CHANGES_EVENT_NOT_DETECTED
 from wazuh_testing.modules.fim.utils import make_diff_file_path, get_fim_event_data
 from wazuh_testing.tools.monitors.file_monitor import FileMonitor
 from wazuh_testing.utils.file import write_file_write, delete_files_in_folder, truncate_file
@@ -104,7 +106,7 @@ test_configuration = load_configuration_template(config_path, test_configuration
 
 
 # Set configurations required by the fixtures.
-local_internal_options = {SYSCHECK_DEBUG: 2, AGENTD_WINDOWS_DEBUG: 2}
+local_internal_options = {SYSCHECK_DEBUG: 2, AGENTD_WINDOWS_DEBUG: 2, RT_DELAY: 1000}
 
 
 # Tests
@@ -177,11 +179,23 @@ def test_reports_file_and_nodiff(test_configuration, test_metadata, configure_lo
 
     # Create the file and and capture the event.
     truncate_file(WAZUH_LOG_PATH)
+    if test_metadata.get('fim_mode') == 'whodata':
+        time.sleep(3)
     original_string = generate_string(1, '0')
     write_file_write(test_file_path, content=original_string)
 
     wazuh_log_monitor.start(generate_callback(EVENT_TYPE_ADDED), timeout=30)
     assert wazuh_log_monitor.callback_result, ERROR_MSG_FIM_EVENT_NOT_DETECTED
+
+    # Modify the file without new content and check content_changes have the correct message
+    time.sleep(1)
+    truncate_file(WAZUH_LOG_PATH)
+    write_file_write(test_file_path, content=original_string)
+
+    wazuh_log_monitor = FileMonitor(WAZUH_LOG_PATH)
+    wazuh_log_monitor.start(generate_callback(EVENT_TYPE_REPORT_CHANGES), timeout=30)
+    assert wazuh_log_monitor.callback_result, ERROR_MSG_REPORT_CHANGES_EVENT_NOT_DETECTED
+    assert 'No content changes were found for this file.' in str(wazuh_log_monitor.callback_result[0]), 'Wrong content_changes field'
 
     # Modify the file with new content.
     truncate_file(WAZUH_LOG_PATH)
@@ -195,15 +209,13 @@ def test_reports_file_and_nodiff(test_configuration, test_metadata, configure_lo
     # Validate content_changes attribute exists in the event
     diff_file = make_diff_file_path(folder=test_metadata.get('folder'), filename=test_metadata.get('filename'))
     assert os.path.exists(diff_file), f'{diff_file} does not exist'
-    assert event.get('content_changes') is not None, 'content_changes is empty'
 
     # Validate content_changes value is truncated if the file is set to no_diff
     if is_truncated:
         assert "Diff truncated due to 'nodiff' configuration detected for this file." in event.get('content_changes'), \
             'content_changes is not truncated'
     else:
-        assert "Diff truncated due to 'nodiff' configuration detected for this file." not in event.get('content_changes'), \
-            'content_changes is truncated'
+        assert '1111111' in event.get('content_changes'), 'Wrong content_changes field'
 
     truncate_file(WAZUH_LOG_PATH)
     delete_files_in_folder(folder)
