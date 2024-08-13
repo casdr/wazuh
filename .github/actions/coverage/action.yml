@@ -64,6 +64,7 @@ runs:
           path: ./${{ inputs.path }}/build/coverage_report
           retention-days: 1
 
+
       # Check whether the coverage is greater than 90% both for lines and functions
       - name: Validate coverage
         shell: bash
